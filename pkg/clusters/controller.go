@@ -83,10 +83,15 @@ func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Reques
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	cluster, err := cluster.New(config)
+	// Create cluster
+	cluster, err := cluster.New(config, func(opts *cluster.Options) {
+		// Set scheme of cluster to that of the management cluster
+		opts.Scheme = mc.manager.GetScheme()
+	})
 	if err != nil {
 		return reconcile.Result{}, err
 	}
+
 	ctx, stop := context.WithCancel(context.TODO())
 
 	go func() {
