@@ -2,39 +2,35 @@ package clusters
 
 import (
 	"context"
-	"time"
 
 	"k8s.io/client-go/util/workqueue"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
-type limiterDecorator struct {
-	workqueue.RateLimiter
-	foget func(interface{})
+type decorator struct {
+	cluster string
+	inner   handler.EventHandler
 }
 
-func (l *limiterDecorator) Forget(item interface{}) {
-	l.foget(item)
-	l.RateLimiter.Forget(item)
+func (d decorator) Create(e event.CreateEvent, q workqueue.RateLimitingInterface) {
+	e.Object.SetClusterName(d.cluster)
+	d.inner.Create(e, q)
 }
+func (d decorator) Update(e event.UpdateEvent, q workqueue.RateLimitingInterface) {
+	e.ObjectNew.SetClusterName(d.cluster)
+	e.ObjectOld.SetClusterName(d.cluster)
+	d.inner.Update(e, q)
+}
+func (d decorator) Delete(e event.DeleteEvent, q workqueue.RateLimitingInterface) {
+	e.Object.SetClusterName(d.cluster)
+	d.inner.Delete(e, q)
 
-type queueDecorator struct {
-	workqueue.RateLimitingInterface
-	add func(interface{})
 }
-
-func (q *queueDecorator) AddAfter(item interface{}, duration time.Duration) {
-	q.add(item)
-	q.RateLimitingInterface.AddAfter(item, duration)
-}
-func (q *queueDecorator) Add(item interface{}) {
-	q.add(item)
-	q.RateLimitingInterface.Add(item)
-}
-func (q *queueDecorator) AddRateLimited(item interface{}) {
-	q.add(item)
-	q.RateLimitingInterface.AddRateLimited(item)
+func (d decorator) Generic(e event.GenericEvent, q workqueue.RateLimitingInterface) {
+	e.Object.SetClusterName(d.cluster)
+	d.inner.Generic(e, q)
 }
 
 type starter func(ctx context.Context, handler handler.EventHandler, queue workqueue.RateLimitingInterface, predicates ...predicate.Predicate) error

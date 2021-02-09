@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
+	"strings"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,7 +34,7 @@ type Cluster struct {
 
 // ClusterAccessor allow multi-cluster controllers to get the Cluster accociated with a reconsile request
 type ClusterAccessor interface {
-	GetCluster(req reconcile.Request) (*Cluster, error)
+	GetCluster(name string) (*Cluster, error)
 }
 
 // ManagmentController is
@@ -50,8 +50,6 @@ type managementCluster struct {
 	logger   logr.Logger
 	clusters map[types.NamespacedName]*Cluster
 	created  chan *Cluster
-	lock     sync.RWMutex
-	requests map[interface{}]*Cluster
 }
 
 func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -72,6 +70,8 @@ func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Reques
 		return reconcile.Result{}, nil
 	}
 
+	//mc.logger.Info("reconsile cluster", "cluster", req.NamespacedName, "watch", watch)
+
 	if !watch {
 		rc.stop()
 		delete(mc.clusters, req.NamespacedName)
@@ -90,6 +90,7 @@ func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Reques
 	ctx, stop := context.WithCancel(context.TODO())
 
 	go func() {
+		mc.logger.Info("starting cluster", "cluster", req.NamespacedName)
 		if err := cluster.Start(ctx); err != nil {
 			mc.logger.Error(err, "could not start cluster", "cluster", fmt.Sprintf("%s/%s", req.Namespace, req.Name))
 		}
@@ -110,16 +111,10 @@ func (mc *managementCluster) Source(kind client.Object) source.Source {
 	return starter(func(ctx context.Context, handler handler.EventHandler, queue workqueue.RateLimitingInterface, predicates ...predicate.Predicate) error {
 		go func() {
 			for cluster := range mc.created {
-				q := &queueDecorator{
-					RateLimitingInterface: queue,
-					add: func(item interface{}) {
-						mc.lock.Lock()
-						defer mc.lock.Unlock()
-						mc.requests[item] = cluster
-					},
+				src := RemoteKind{Cluster: cluster.Name.Namespace + ":" + cluster.Name.Name, SyncingSource: source.NewKindWithCache(kind, cluster.GetCache())}
+				if err := src.Start(ctx, handler, queue, predicates...); err != nil {
+					mc.logger.Error(err, "could not start source")
 				}
-				source.NewKindWithCache(kind, cluster.GetCache()).
-					Start(ctx, handler, q, predicates...)
 			}
 		}()
 		return nil
@@ -127,33 +122,20 @@ func (mc *managementCluster) Source(kind client.Object) source.Source {
 }
 
 func (mc *managementCluster) WorkloadClusterController(name string, options controller.Options) (controller.Controller, error) {
-	limiter := options.RateLimiter
-	if limiter == nil {
-		limiter = workqueue.DefaultControllerRateLimiter()
-	}
-	// we abuse the rate limiter to GC our reconsile request cluster association
-	options.RateLimiter = &limiterDecorator{
-		RateLimiter: limiter,
-		foget: func(item interface{}) {
-			mc.lock.Lock()
-			defer mc.lock.Unlock()
-			delete(mc.requests, item)
-		},
-	}
 	return controller.New(name, mc.manager, options)
 }
 
-func (mc *managementCluster) GetCluster(req reconcile.Request) (*Cluster, error) {
-	mc.lock.RLock()
-	defer mc.lock.RUnlock()
-	if c, ok := mc.requests[req]; ok {
-		return c, nil
+func (mc *managementCluster) GetCluster(name string) (*Cluster, error) {
+	nsn := strings.Split(name, ":")
+	cluster, ok := mc.clusters[types.NamespacedName{Namespace: nsn[0], Name: nsn[1]}]
+	if !ok {
+		return nil, errors.New("cluster not found")
 	}
-	return nil, errors.New("no cluster associated with request")
+	return cluster, nil
 }
 
 // NewManagementController create a controller that watch a management cluster for clusters' lifecycle
-func NewManagementController(m manager.Manager) (ManagmentController, error) {
+func NewManagementController(m manager.Manager, predicates ...predicate.Predicate) (ManagmentController, error) {
 	m.GetLogger()
 	ctrl := &managementCluster{
 		client:   m.GetClient(),
@@ -161,11 +143,10 @@ func NewManagementController(m manager.Manager) (ManagmentController, error) {
 		logger:   m.GetLogger().WithValues("controller", "management"),
 		clusters: map[types.NamespacedName]*Cluster{},
 		created:  make(chan *Cluster),
-		requests: map[interface{}]*Cluster{},
-		lock:     sync.RWMutex{},
 	}
+
 	err := builder.ControllerManagedBy(m).
-		For(&capi.Cluster{}).
+		For(&capi.Cluster{}, builder.WithPredicates(predicates...)).
 		Complete(ctrl)
 	return ctrl, err
 }
