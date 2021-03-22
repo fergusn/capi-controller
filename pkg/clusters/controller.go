@@ -75,6 +75,7 @@ func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Reques
 	if !watch {
 		rc.stop()
 		delete(mc.clusters, req.NamespacedName)
+		mc.created <- &Cluster{Cluster: cluster.cluster{}, Name: req.NamespacedName}
 		return reconcile.Result{}, nil
 	}
 
