@@ -2,12 +2,12 @@ package clusters
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 
@@ -73,8 +73,10 @@ func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Reques
 	//mc.logger.Info("reconsile cluster", "cluster", req.NamespacedName, "watch", watch)
 
 	if !watch {
+		mc.logger.Info("deleting cluster", "cluster", req.NamespacedName)
 		rc.stop()
 		delete(mc.clusters, req.NamespacedName)
+		mc.created <- rc
 		return reconcile.Result{}, nil
 	}
 
@@ -134,7 +136,10 @@ func (mc *managementCluster) GetCluster(name string) (*Cluster, error) {
 	nsn := strings.Split(name, ":")
 	cluster, ok := mc.clusters[types.NamespacedName{Namespace: nsn[0], Name: nsn[1]}]
 	if !ok {
-		return nil, errors.New("cluster not found")
+		gvk := (&capi.Cluster{}).GetObjectKind().GroupVersionKind()
+		return nil, apierrors.NewNotFound(
+			schema.GroupResource{Group: gvk.Group, Resource: gvk.Kind}, nsn[1],
+		)
 	}
 	return cluster, nil
 }
