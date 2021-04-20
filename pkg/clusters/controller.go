@@ -9,6 +9,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 
 	capi "sigs.k8s.io/cluster-api/api/v1alpha3"
@@ -114,6 +115,34 @@ func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Reques
 	return reconcile.Result{}, nil
 }
 
+func (mc *managementCluster) AddRemote(nsn types.NamespacedName, config *rest.Config) error {
+	cluster, err := cluster.New(config, func(opts *cluster.Options) {
+		// Set scheme of cluster to that of the management cluster
+		opts.Scheme = mc.manager.GetScheme()
+	})
+	if err != nil {
+		return err
+	}
+
+	ctx, stop := context.WithCancel(context.TODO())
+
+	go func() {
+		mc.logger.Info("starting cluster", "cluster", nsn)
+		if err := cluster.Start(ctx); err != nil {
+			mc.logger.Error(err, "could not start cluster", "cluster", fmt.Sprintf("%s/%s", nsn.Namespace, nsn.Name))
+		}
+	}()
+
+	rc := &Cluster{
+		Cluster: cluster,
+		Name:    nsn,
+		stop:    stop,
+	}
+	mc.clusters[nsn] = rc
+	mc.created <- rc
+	return nil
+}
+
 func (mc *managementCluster) Source(kind client.Object) source.Source {
 	return starter(func(ctx context.Context, handler handler.EventHandler, queue workqueue.RateLimitingInterface, predicates ...predicate.Predicate) error {
 		go func() {
@@ -152,7 +181,7 @@ func NewManagementController(m manager.Manager, predicates ...predicate.Predicat
 		manager:  m,
 		logger:   m.GetLogger().WithValues("controller", "management"),
 		clusters: map[types.NamespacedName]*Cluster{},
-		created:  make(chan *Cluster),
+		created:  make(chan *Cluster, 20),
 	}
 
 	err := builder.ControllerManagedBy(m).
