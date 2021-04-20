@@ -43,6 +43,7 @@ type ManagmentController interface {
 	ClusterAccessor
 	Source(kind client.Object) source.Source
 	WorkloadClusterController(name string, options controller.Options) (controller.Controller, error)
+	AddRemote(nsn types.NamespacedName, config *rest.Config) error
 }
 
 type managementCluster struct {
