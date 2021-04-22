@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
@@ -52,6 +53,7 @@ type managementCluster struct {
 	logger   logr.Logger
 	clusters map[types.NamespacedName]*Cluster
 	created  chan *Cluster
+	kind     client.Object
 }
 
 func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -95,6 +97,16 @@ func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Reques
 		opts.Scheme = mc.manager.GetScheme()
 	})
 	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   mc.kind.GetObjectKind().GroupVersionKind().Group,
+		Kind:    mc.kind.GetObjectKind().GroupVersionKind().Kind + "List",
+		Version: mc.kind.GetObjectKind().GroupVersionKind().Version,
+	})
+	if err := cluster.GetClient().List(ctx, list); err != nil {
 		return reconcile.Result{}, err
 	}
 
@@ -147,6 +159,7 @@ func (mc *managementCluster) AddRemote(nsn types.NamespacedName, config *rest.Co
 }
 
 func (mc *managementCluster) Source(kind client.Object) source.Source {
+	mc.kind = kind
 	return starter(func(ctx context.Context, handler handler.EventHandler, queue workqueue.RateLimitingInterface, predicates ...predicate.Predicate) error {
 		go func() {
 			for cluster := range mc.created {
