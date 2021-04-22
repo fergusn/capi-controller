@@ -57,6 +57,8 @@ type managementCluster struct {
 func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	var resource capi.Cluster
 
+	mc.logger.Info("reconsile", "namespace", req.Namespace, "name", req.Name)
+
 	err := mc.client.Get(ctx, req.NamespacedName, &resource)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return reconcile.Result{}, err
@@ -64,7 +66,7 @@ func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Reques
 
 	watch := err == nil &&
 		resource.DeletionTimestamp == nil &&
-		resource.Status.ControlPlaneReady &&
+		resource.Status.ControlPlaneInitialized &&
 		!resource.Spec.Paused
 
 	rc, ok := mc.clusters[req.NamespacedName]
@@ -148,6 +150,7 @@ func (mc *managementCluster) Source(kind client.Object) source.Source {
 	return starter(func(ctx context.Context, handler handler.EventHandler, queue workqueue.RateLimitingInterface, predicates ...predicate.Predicate) error {
 		go func() {
 			for cluster := range mc.created {
+				mc.logger.Info("watching cluster %s/%s", cluster.Name.Namespace, cluster.Name.Name)
 				src := RemoteKind{Cluster: cluster.Name.Namespace + ":" + cluster.Name.Name, SyncingSource: source.NewKindWithCache(kind, cluster.GetCache())}
 				if err := src.Start(ctx, handler, queue, predicates...); err != nil {
 					mc.logger.Error(err, "could not start source")
