@@ -3,6 +3,7 @@ package clusters
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -100,11 +101,16 @@ func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Reques
 		return reconcile.Result{}, err
 	}
 
+	gvks, _, err := mc.manager.GetScheme().ObjectKinds(mc.kind)
+	if err != nil || len(gvks) != 1 {
+		log.Fatal("could not get kind metadata")
+	}
+
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   mc.kind.GetObjectKind().GroupVersionKind().Group,
-		Kind:    mc.kind.GetObjectKind().GroupVersionKind().Kind + "List",
-		Version: mc.kind.GetObjectKind().GroupVersionKind().Version,
+		Group:   gvks[0].Group,
+		Kind:    gvks[0].Kind + "List",
+		Version: gvks[0].Version,
 	})
 	if err := cluster.GetClient().List(ctx, list); err != nil {
 		return reconcile.Result{}, err
