@@ -88,7 +88,7 @@ func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Reques
 	}
 
 	// add clusters
-	config, err := remote.RESTConfig(ctx, mc.client, req.NamespacedName)
+	config, err := remote.RESTConfig(ctx, "capi-controller", mc.client, req.NamespacedName)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
