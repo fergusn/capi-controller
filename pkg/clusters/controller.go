@@ -40,12 +40,16 @@ type ClusterAccessor interface {
 	GetCluster(name string) (*Cluster, error)
 }
 
+// ClusterHookFunc allow running things before the cluster start (e.g. adding indexes)
+type ClusterHookFunc func(*Cluster) error
+
 // ManagmentController is
 type ManagmentController interface {
 	ClusterAccessor
 	Source(kind client.Object) source.Source
 	WorkloadClusterController(name string, options controller.Options) (controller.Controller, error)
 	AddRemote(nsn types.NamespacedName, config *rest.Config) error
+	SetClusterHookFunc(hook ClusterHookFunc)
 }
 
 type managementCluster struct {
@@ -55,6 +59,7 @@ type managementCluster struct {
 	clusters map[types.NamespacedName]*Cluster
 	created  chan *Cluster
 	kind     client.Object
+	hook     ClusterHookFunc
 }
 
 func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -117,14 +122,6 @@ func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Reques
 	}
 
 	ctx, stop := context.WithCancel(context.TODO())
-
-	go func() {
-		mc.logger.Info("starting cluster", "cluster", req.NamespacedName)
-		if err := cluster.Start(ctx); err != nil {
-			mc.logger.Error(err, "could not start cluster", "cluster", fmt.Sprintf("%s/%s", req.Namespace, req.Name))
-		}
-	}()
-
 	rc = &Cluster{
 		Cluster: cluster,
 		Name:    req.NamespacedName,
@@ -133,6 +130,15 @@ func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Reques
 	mc.clusters[req.NamespacedName] = rc
 	mc.created <- rc
 
+	if err := mc.hook(rc); err != nil {
+		return reconcile.Result{}, err
+	}
+	go func() {
+		mc.logger.Info("starting cluster", "cluster", req.NamespacedName)
+		if err := cluster.Start(ctx); err != nil {
+			mc.logger.Error(err, "could not start cluster", "cluster", fmt.Sprintf("%s/%s", req.Namespace, req.Name))
+		}
+	}()
 	return reconcile.Result{}, nil
 }
 
@@ -196,6 +202,8 @@ func (mc *managementCluster) GetCluster(name string) (*Cluster, error) {
 	return cluster, nil
 }
 
+func (mc *managementCluster) SetClusterHookFunc(hook ClusterHookFunc) { mc.hook = hook }
+
 // NewManagementController create a controller that watch a management cluster for clusters' lifecycle
 func NewManagementController(m manager.Manager, predicates ...predicate.Predicate) (ManagmentController, error) {
 	m.GetLogger()
@@ -205,6 +213,7 @@ func NewManagementController(m manager.Manager, predicates ...predicate.Predicat
 		logger:   m.GetLogger().WithValues("controller", "management"),
 		clusters: map[types.NamespacedName]*Cluster{},
 		created:  make(chan *Cluster, 20),
+		hook:     func(_ *Cluster) error { return nil },
 	}
 
 	err := builder.ControllerManagedBy(m).
