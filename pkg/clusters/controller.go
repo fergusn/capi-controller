@@ -74,7 +74,7 @@ func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Reques
 
 	watch := err == nil &&
 		resource.DeletionTimestamp == nil &&
-		resource.Status.ControlPlaneInitialized &&
+		(resource.Status.ControlPlaneInitialized || resource.GetAnnotations()["capi.fergusn.github.com/initialized"] == "true") &&
 		!resource.Spec.Paused
 
 	rc, ok := mc.clusters[req.NamespacedName]
