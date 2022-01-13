@@ -14,7 +14,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 
-	capi "sigs.k8s.io/cluster-api/api/v1alpha3"
+	capi "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/remote"
 
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -74,7 +74,7 @@ func (mc *managementCluster) Reconcile(ctx context.Context, req reconcile.Reques
 
 	watch := err == nil &&
 		resource.DeletionTimestamp == nil &&
-		(resource.Status.ControlPlaneInitialized || resource.GetAnnotations()["capi.fergusn.github.com/initialized"] == "true") &&
+		(resource.Status.ControlPlaneReady || resource.GetAnnotations()["capi.fergusn.github.com/initialized"] == "true") &&
 		!resource.Spec.Paused
 
 	rc, ok := mc.clusters[req.NamespacedName]
