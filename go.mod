@@ -2,7 +2,7 @@ module github.com/fergusn/capi-controller
 
 go 1.17
 
-replace sigs.k8s.io/cluster-api => sigs.k8s.io/cluster-api v1.0.2
+replace sigs.k8s.io/controller-runtime => github.com/fergusn/controller-runtime v0.11.3
 
 require (
 	github.com/go-logr/logr v1.2.2
@@ -66,5 +66,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.0 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
-
-replace sigs.k8s.io/controller-runtime => github.com/varunjain0606/controller-runtime v0.11.0-alpha.1
